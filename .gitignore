@@ -34,6 +34,17 @@ yarn-error.log*
 .env*
 
 /data/source_documents/
+/services/rag/processed/
+/services/rag/reports/*
+!/services/rag/reports/legal_chunking/
+/services/rag/reports/legal_chunking/*
+!/services/rag/reports/legal_chunking/final_ingestion_report.md
+!/services/rag/reports/legal_chunking/final_ingestion_report.json
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
 # vercel
 .vercel

@@ -1,5 +1,6 @@
 
 import re
+from typing import Any
 
 
 def clean_extracted_text(text: str) -> str:
@@ -40,3 +41,16 @@ def clean_extracted_text(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
 
     return text.strip()
+
+
+def clean_extracted_pages(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add cleaned_text while retaining the original extracted text and page number."""
+    cleaned = []
+    for index, page in enumerate(pages, start=1):
+        original = str(page.get("original_text", page.get("text", "")) or "")
+        cleaned.append({
+            "page_number": int(page.get("page_number", index)),
+            "original_text": original,
+            "cleaned_text": clean_extracted_text(original),
+        })
+    return cleaned

@@ -1,0 +1,9 @@
+# Install into the project's Python environment when these stages are needed.
+pymupdf
+google-api-python-client
+google-auth
+google-auth-httplib2
+httplib2
+google-genai
+psycopg[binary]
+

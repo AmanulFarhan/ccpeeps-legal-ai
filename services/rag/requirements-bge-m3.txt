@@ -1,0 +1,2 @@
+# Optional local dense embedding backend; installs PyTorch/FlagEmbedding dependencies
+FlagEmbedding

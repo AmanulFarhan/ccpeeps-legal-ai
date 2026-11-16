@@ -79,3 +79,17 @@ def chunk_document(pages: list[dict]) -> list[dict]:
         })
 
     return chunks
+
+
+def chunk_legal_document(pages: list[dict], document_id: str, config=None):
+    """Use the generalized legal chunker while preserving the legacy BNS API above.
+
+    Pages may contain ``original_text``/``text`` (preferred) or the existing
+    ``cleaned_text`` field. The returned analysis includes exact reconstruction.
+    """
+    from services.rag.ingestion.legal_chunker import (
+        ChunkingConfig,
+        chunk_document as _chunk_legal,
+    )
+
+    return _chunk_legal(pages, document_id, config or ChunkingConfig())
