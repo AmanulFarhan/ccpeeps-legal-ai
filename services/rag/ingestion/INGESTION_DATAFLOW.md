@@ -4,27 +4,21 @@ This guide maps the legal-document ingestion code in this directory: what each s
 
 ## End-to-end flow
 
-```mermaid
-flowchart LR
-  D[Google Drive PDFs] --> DC[drive_client]
-  DC --> P[pdf_extractor]
-  P --> C[text_cleaner]
-  C --> L[legal_chunker]
-  L --> V[chunk_validator]
-  V --> Q[quality_selection]
-  Q --> E[embedder: local BGE-M3]
-  E --> M[document_mapping]
-  M --> S[vector_store]
-  R[batch_runner / run_legal_corpus / cli] -. orchestrates .-> DC
-  R -.-> P
-  R -.-> C
-  R -.-> L
-  R -.-> V
-  R -.-> E
-  R -.-> S
-```
+1. batch_runner.py — discovers PDFs, skips unchanged files, downloads each PDF, and saves chunk outputs.
+2. pdf_extractor.py — extracts text page by page.
+3. text_cleaner.py — creates cleaned text while retaining the extracted source text.
+4. legal_chunker.py — recognizes legal structure and forms chunks.
+5. chunk_validator.py — checks metadata, provenance, and text reconstruction.
+6. batch_validator.py — checks the generated batch against the original Drive PDFs.
+7. quality_selection.py — partitions chunks into accepted, rejected, and quarantined sets.
+For the embedding and database path, continue afterward:
+8. embedder.py — generates vectors for accepted chunks.
+9. document_mapping.py — maps Drive source IDs to database document UUIDs and prepares records.
+10. vector_store.py — checks schema and writes document/chunk records.
+11. run_legal_corpus.py — orchestrates the pilot and corpus embedding/storage stages.
+document_processor.py and cli.py provide reusable single-document and manual stage commands
 
-The normal sequence is discovery/download, extraction, cleaning, legal chunking, validation, quality review, embedding, then storage. The general CLI can run stages separately. The corpus runner adds pilot checks, resumability, and post-write verification. Chunking and validation can be run without embeddings or database writes.
+The normal sequence is discovery/download, extraction, cleaning, legal chunking, validation, quality review, embedding, then storage. Retrieval is implemented separately in the sibling [retrieval package](../retrieval/). The general CLI can run ingestion stages separately. The corpus runner adds pilot checks, resumability, and post-write verification. Chunking and validation can be run without embeddings or database writes.
 
 ## Modules
 

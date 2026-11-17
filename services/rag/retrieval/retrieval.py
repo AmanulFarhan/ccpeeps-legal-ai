@@ -8,7 +8,7 @@ can be used; ranked lists are fused with reciprocal rank fusion (RRF).
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Callable
 
 
 _RESULT_COLUMNS = (
@@ -33,13 +33,18 @@ class LegalRetriever:
     identifiers such as section numbers.
     """
 
-    def __init__(self, connection, embedder):
+    def __init__(self, connection, embedder, *, progress_callback: Callable[[str], None] | None = None):
         if connection is None:
             raise ValueError("A PostgreSQL connection is required.")
         if not callable(getattr(embedder, "embed_query", None)):
             raise ValueError("embedder must provide embed_query(text).")
         self.connection = connection
         self.embedder = embedder
+        self.progress_callback = progress_callback
+
+    def _report_progress(self, message: str) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(message)
 
     @staticmethod
     def _as_dicts(cursor, rows) -> list[dict[str, Any]]:
@@ -105,8 +110,8 @@ class LegalRetriever:
         top_k: int = 10,
         candidate_k: int = 40,
         rrf_k: int = 60,
-        semantic_weight: float = 1.0,
-        keyword_weight: float = 1.0,
+        semantic_weight: float = 0.75,
+        keyword_weight: float = 0.25,
     ) -> list[dict[str, Any]]:
         """Return fused semantic and keyword results without loading the corpus."""
         if not isinstance(query, str) or not query.strip():
@@ -116,9 +121,15 @@ class LegalRetriever:
         if semantic_weight < 0 or keyword_weight < 0:
             raise ValueError("Search weights must be non-negative.")
 
+        self._report_progress("Creating query embedding...")
         vector = self._vector_literal(self.embedder.embed_query(query.strip()))
+        self._report_progress("Query embedding ready. Searching vector index...")
         semantic = self._semantic_candidates(vector, candidate_k)
+        self._report_progress(
+            f"Vector search returned {len(semantic)} candidates. Searching keyword index..."
+        )
         keyword = self._keyword_candidates(query.strip(), candidate_k)
+        self._report_progress(f"Keyword search returned {len(keyword)} candidates.")
 
         fused: dict[tuple[str, int], dict[str, Any]] = {}
         for source, weight, score_key in (

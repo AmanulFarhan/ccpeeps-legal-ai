@@ -32,7 +32,7 @@ fuses the rankings with reciprocal rank fusion. It does not load the full
 
 ```python
 from services.rag.ingestion.embedder import BgeM3Embedder
-from services.rag.ingestion.retrieval import LegalRetriever
+from services.rag.retrieval.retrieval import LegalRetriever
 from services.rag.ingestion.vector_store import connect_from_env
 
 connection = connect_from_env()
@@ -47,16 +47,16 @@ finally:
     connection.close()
 ```
 
-Run `hybrid_search_indexes.sql` once to create the cosine HNSW and full-text
+Run `services/rag/retrieval/hybrid_search_indexes.sql` once to create the cosine HNSW and full-text
 GIN indexes if they are absent. Check existing index definitions first;
 `IF NOT EXISTS` does not replace a mismatched index.
 
-The application-facing Q&A service is `services/rag/legal_qa.py`. Set
+The application-facing Q&A service is `services/rag/retrieval/legal_qa.py`. Set
 `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) and the database URL, then call it from
 your app like this:
 
 ```python
-from services.rag.legal_qa import LegalQAPipeline
+from services.rag.retrieval.legal_qa import LegalQAPipeline
 
 with LegalQAPipeline.from_env(top_k=5) as legal_qa:
     result = legal_qa.answer(user_query)
@@ -64,6 +64,9 @@ with LegalQAPipeline.from_env(top_k=5) as legal_qa:
     for source in result["sources"]:
         print(source["title"], source["section_number"], source["page_number"])
 ```
+
+Run the interactive local check from the repository root with
+`python -m services.rag.retrieval.manual_check`.
 
 The query embedding is used for database search; Gemini receives the retrieved
 chunk text and source labels, not the numeric embedding vectors.

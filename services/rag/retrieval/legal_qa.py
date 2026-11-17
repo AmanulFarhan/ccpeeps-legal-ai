@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from dotenv import load_dotenv
 
 from services.rag.ingestion.embedder import BgeM3Embedder
-from services.rag.ingestion.retrieval import LegalRetriever
+from services.rag.retrieval.retrieval import LegalRetriever
 from services.rag.ingestion.vector_store import connect_from_env
 
 
@@ -44,6 +45,8 @@ FORMAT:
 
 If there are no retrieved passages, say that the available evidence does not support an answer and do not make legal claims."""
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
 
 class LegalQAPipeline:
     """Retrieve the top legal chunks and use them as Gemini answer context.
@@ -52,25 +55,58 @@ class LegalQAPipeline:
     the database connection, local embedding model, and Gemini chat model.
     """
 
-    def __init__(self, retriever: LegalRetriever, llm: Any, *, top_k: int = 5):
+    def __init__(
+        self,
+        retriever: LegalRetriever,
+        llm: Any,
+        *,
+        top_k: int = 5,
+        progress_callback: Callable[[str], None] | None = None,
+    ):
         if top_k <= 0:
             raise ValueError("top_k must be greater than zero.")
         self.retriever = retriever
         self.llm = llm
         self.top_k = top_k
+        self.progress_callback = progress_callback
 
     @classmethod
-    def from_env(cls, *, top_k: int = 5, candidate_k: int = 40) -> "LegalQAPipeline":
-        """Build the pipeline from SUPABASE_DB_URL and Gemini API-key env vars."""
-        load_dotenv()
+    def from_env(
+        cls,
+        *,
+        top_k: int = 5,
+        candidate_k: int = 40,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> "LegalQAPipeline":
+        """Build the pipeline from project .env.local/.env and process env vars.
+
+        Process environment variables take precedence. When both dotenv files
+        define a key, .env.local takes precedence over .env.
+        """
+        # Explicit paths make startup independent of the shell's current
+        # directory; load .env.local first so it wins over the shared .env.
+        load_dotenv(dotenv_path=_PROJECT_ROOT / ".env.local")
+        load_dotenv(dotenv_path=_PROJECT_ROOT / ".env")
         connection = connect_from_env()
         try:
+            with connection.cursor() as cursor:
+                # Keep a slow or unindexed retrieval query from appearing hung.
+                cursor.execute("SET statement_timeout = '60s'")
             embedder = BgeM3Embedder()
-            retriever = LegalRetriever(connection, embedder)
-            llm = ChatGoogleGenerativeAI(
-                model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+            retriever = LegalRetriever(
+                connection, embedder, progress_callback=progress_callback
             )
-            pipeline = cls(retriever, llm, top_k=top_k)
+            llm = ChatGoogleGenerativeAI(
+                model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
+                timeout=float(os.getenv("GEMINI_REQUEST_TIMEOUT_SECONDS", "120")),
+                max_retries=1,
+            )
+            pipeline = cls(
+                retriever,
+                llm,
+                top_k=top_k,
+                progress_callback=progress_callback,
+            )
             pipeline._connection = connection
             pipeline._candidate_k = candidate_k
             return pipeline
@@ -106,10 +142,12 @@ class LegalQAPipeline:
             )
         return str(content)
 
-    def answer(self, query: str) -> dict[str, Any]:
+    def answer(self, query: str, *, response_language: str = "English") -> dict[str, Any]:
         """Answer one user query and return the answer plus its source chunks."""
         if not isinstance(query, str) or not query.strip():
             raise ValueError("query must be a non-empty string.")
+        if response_language not in {"English", "Malayalam"}:
+            raise ValueError("response_language must be English or Malayalam.")
 
         chunks = self.retriever.hybrid_search(
             query.strip(),
@@ -117,21 +155,31 @@ class LegalQAPipeline:
             candidate_k=getattr(self, "_candidate_k", 40),
         )
         if not chunks:
+            self._report_progress("No matching chunks found; skipping Gemini generation.")
             return {"answer": "I could not find relevant chunks in the legal database.", "sources": []}
 
         messages = [
             ("system", _LEGAL_SYSTEM_PROMPT),
             (
                 "human",
+                f"## RESPONSE LANGUAGE\n\nRespond in {response_language}.\n\n"
                 f"## USER QUESTION\n\n{query.strip()}\n\n"
                 f"## RETRIEVED LEGAL PASSAGES\n\n{self._format_context(chunks)}",
             ),
         ]
+        self._report_progress(
+            f"Retrieved {len(chunks)} chunks. Waiting for Gemini to generate the answer..."
+        )
         response = self.llm.invoke(messages)
+        self._report_progress("Gemini response received.")
         return {
             "answer": self._response_text(response.content),
             "sources": chunks,
         }
+
+    def _report_progress(self, message: str) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(message)
 
     def close(self) -> None:
         """Close the owned database connection, if built with from_env()."""
