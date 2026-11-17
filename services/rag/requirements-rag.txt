@@ -1,0 +1,3 @@
+# Complete dependencies for the application-facing legal RAG pipeline.
+-r requirements-ingestion.txt
+-r requirements-bge-m3.txt

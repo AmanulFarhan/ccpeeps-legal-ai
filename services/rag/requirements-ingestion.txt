@@ -5,5 +5,7 @@ google-auth
 google-auth-httplib2
 httplib2
 google-genai
+langchain-google-genai
+python-dotenv
 psycopg[binary]
 

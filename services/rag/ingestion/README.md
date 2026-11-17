@@ -2,7 +2,7 @@
 
 The reusable PDF extraction, cleaning, legal chunking, validation, embedding, and vector-store services are in this package. Run commands from the repository root.
 
-Install pipeline dependencies with `python -m pip install -r services/rag/requirements-ingestion.txt`. For local BGE-M3 embeddings, also install `services/rag/requirements-bge-m3.txt`.
+Install the complete Q&A pipeline dependencies with `python -m pip install -r services/rag/requirements-rag.txt`. This includes the ingestion dependencies and local BGE-M3 embedding backend.
 
 ## Common commands
 
@@ -21,6 +21,52 @@ python -m services.rag.ingestion.cli embed --embedding-provider bge-m3 --chunks 
 ```
 
 The batch output directory defaults to `services/rag/processed/legal_chunking/` and is Git-ignored. Set `LEGAL_CHUNK_OUTPUT_DIR` to choose another local directory. Drive credentials use `GOOGLE_APPLICATION_CREDENTIALS` and `GOOGLE_DRIVE_FOLDER_ID`. BGE-M3 downloads model weights on first use and emits 1024-dimensional vectors. Ensure the database vector column and query embedding model/dimensions match before storage or retrieval. No OCR is performed by these services.
+
+## Hybrid retrieval
+
+`LegalRetriever` embeds each query with the same local BGE-M3 model as ingestion,
+fetches bounded cosine-vector and full-text candidate sets from Postgres, then
+fuses the rankings with reciprocal rank fusion. It does not load the full
+`legal_chunks` table into application memory. Set `SUPABASE_DB_URL` (or
+`DATABASE_URL`) to a PostgreSQL connection string, then use:
+
+```python
+from services.rag.ingestion.embedder import BgeM3Embedder
+from services.rag.ingestion.retrieval import LegalRetriever
+from services.rag.ingestion.vector_store import connect_from_env
+
+connection = connect_from_env()
+try:
+    retriever = LegalRetriever(connection, BgeM3Embedder())
+    chunks = retriever.hybrid_search(
+        "What does section 10 require?",
+        top_k=8,
+        candidate_k=40,
+    )
+finally:
+    connection.close()
+```
+
+Run `hybrid_search_indexes.sql` once to create the cosine HNSW and full-text
+GIN indexes if they are absent. Check existing index definitions first;
+`IF NOT EXISTS` does not replace a mismatched index.
+
+The application-facing Q&A service is `services/rag/legal_qa.py`. Set
+`GEMINI_API_KEY` (or `GOOGLE_API_KEY`) and the database URL, then call it from
+your app like this:
+
+```python
+from services.rag.legal_qa import LegalQAPipeline
+
+with LegalQAPipeline.from_env(top_k=5) as legal_qa:
+    result = legal_qa.answer(user_query)
+    print(result["answer"])
+    for source in result["sources"]:
+        print(source["title"], source["section_number"], source["page_number"])
+```
+
+The query embedding is used for database search; Gemini receives the retrieved
+chunk text and source labels, not the numeric embedding vectors.
 
 ## Selected corpus embedding and staged storage
 
